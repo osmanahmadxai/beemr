@@ -163,6 +163,7 @@ beemr get <ticket> -o ~/Downloads      # download into a specific folder
 | `-p`, `--port <port>` | Listen on a specific port instead of a random one. |
 | `--no-port-mapping` | Don't ask your router to open a port (UPnP, PCP, NAT-PMP). |
 | `--no-relay` | Don't relay for other beemr users while sharing (see [How it connects](#how-it-connects)). |
+| `--copy` | Copy the `beemr get …` command to the clipboard. |
 
 ### Your device and contacts
 

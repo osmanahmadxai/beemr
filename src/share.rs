@@ -46,6 +46,8 @@ pub struct ShareOptions {
     pub upnp: bool,
     /// Relay for other beemr devices while sharing, when reachable.
     pub relay_for_others: bool,
+    /// Copy the `beemr get <ticket>` command to the system clipboard.
+    pub copy: bool,
 }
 
 /// Why sharing stopped.
@@ -99,9 +101,14 @@ pub async fn run(options: ShareOptions, profile: Profile) -> Result<Outcome> {
         changed: Notify::new(),
     });
     print_policy(&share, options.expires_in);
+    let command = format!("beemr get {}", ticket.encode());
     eprintln!("\nOn the other device, run:\n");
-    println!("    beemr get {}", ticket.encode());
+    println!("    {command}");
     eprintln!();
+
+    if options.copy {
+        copy_to_clipboard(&command);
+    }
 
     let (onion_tx, onion_rx) = watch::channel(None);
     if let Some(dht) = &dht {
@@ -882,4 +889,67 @@ async fn with_timeout<T>(future: impl std::future::Future<Output = Result<T>>) -
     tokio::time::timeout(TRANSFER_TIMEOUT, future)
         .await
         .map_err(|_| Error::new("the other device stopped responding"))?
+}
+
+fn copy_to_clipboard(text: &str) {
+    match try_copy_to_clipboard(text) {
+        Ok(()) => eprintln!("  ✓ Copied the command to the clipboard"),
+        Err(e) => eprintln!("  ✗ {e}"),
+    }
+}
+
+fn try_copy_to_clipboard(text: &str) -> std::result::Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_clipboard_cmd("clip.exe", &[], text)
+            .map_err(|_| "Couldn't copy to the clipboard".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        run_clipboard_cmd("pbcopy", &[], text)
+            .map_err(|_| "Couldn't copy to the clipboard".to_string())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let tools: &[(&str, &[&str])] = &[
+            ("wl-copy", &[]),
+            ("xclip", &["-selection", "clipboard"]),
+            ("xsel", &["--clipboard", "--input"]),
+        ];
+
+        for (cmd, args) in tools {
+            if run_clipboard_cmd(cmd, args, text).is_ok() {
+                return Ok(());
+            }
+        }
+        Err("Couldn't copy to the clipboard (install wl-clipboard, xclip or xsel)".to_string())
+    }
+}
+
+fn run_clipboard_cmd(cmd: &str, args: &[&str], text: &str) -> std::result::Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| e.to_string())?;
+    } // stdin is dropped here, so the tool sees end-of-file
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("exited with {status}"))
+    }
 }
